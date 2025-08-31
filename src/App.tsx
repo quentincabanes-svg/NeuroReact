@@ -1,710 +1,538 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import { Slider } from "@/components/ui/slider";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Separator } from "@/components/ui/separator";
-import { Progress } from "@/components/ui/progress";
-import { Play, Pause, Square, Volume2, VolumeX, Maximize2, Minimize2 } from "lucide-react";
 
-// === Types ===
+// =============================
+// VERSION SANS DÉPENDANCES (copie-colle dans src/App.tsx)
+// =============================
+//
+// Cette version n’utilise AUCUNE bibliothèque UI (pas de shadcn, pas d’icônes).
+// Elle fonctionne sur GitHub Pages avec Vite + React uniquement.
+// Conserve ton index.html, vite.config.ts, tsconfig.json, package.json comme indiqués.
+// Remplace simplement le contenu de src/App.tsx par ce fichier.
 
-type Mode =
-  | "stroop"
-  | "numbers"
-  | "color"
-  | "directions"
-  | "numberColor"
-  | "directionColor";
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+
+type Mode = 'stroop' | 'numbers' | 'color' | 'directions' | 'numberColor' | 'directionColor'
 
 type Stimulus = {
-  kind: "text" | "block";
-  content?: string; // for text (words, digits, arrows)
-  textColor?: string; // CSS color
-  bgColor?: string; // CSS color
-};
-
-// === Helpers ===
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-function randItem<T>(arr: T[]): T {
-  if (!arr || arr.length === 0) throw new Error("Empty selection");
-  return arr[Math.floor(Math.random() * arr.length)];
+  kind: 'text' | 'block'
+  content?: string
+  textColor?: string
+  bgColor?: string
 }
 
-const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
+const DIGITS = Array.from({ length: 10 }, (_, i) => i)
+const DIRECTIONS = [
+  { key: 'N', label: 'Haut', char: '↑' },
+  { key: 'E', label: 'Droite', char: '→' },
+  { key: 'S', label: 'Bas', char: '↓' },
+  { key: 'W', label: 'Gauche', char: '←' },
+  { key: 'NE', label: 'Haut‑Droite', char: '↗' },
+  { key: 'SE', label: 'Bas‑Droite', char: '↘' },
+  { key: 'SW', label: 'Bas‑Gauche', char: '↙' },
+  { key: 'NW', label: 'Haut‑Gauche', char: '↖' }
+]
 
-// === Palettes ===
+const NAMED_COLORS = [
+  ['Rouge', '#ef4444'],
+  ['Vert', '#22c55e'],
+  ['Bleu', '#3b82f6'],
+  ['Jaune', '#eab308'],
+  ['Orange', '#f97316'],
+  ['Violet', '#a855f7'],
+  ['Rose', '#ec4899'],
+  ['Noir', '#111827'],
+  ['Blanc', '#ffffff'],
+  ['Gris', '#9ca3af']
+] as const
 
-type ColorSwatch = { key: string; label: string; hex: string };
+const DEFAULT_TEXT_COLORS = ['#ef4444', '#22c55e', '#3b82f6', '#eab308']
+const DEFAULT_BG_COLORS = ['#111827', '#ffffff', '#9ca3af']
 
-const PALETTE: ColorSwatch[] = [
-  { key: "rouge", label: "Rouge", hex: "#ef4444" },
-  { key: "vert", label: "Vert", hex: "#22c55e" },
-  { key: "bleu", label: "Bleu", hex: "#3b82f6" },
-  { key: "jaune", label: "Jaune", hex: "#eab308" },
-  { key: "orange", label: "Orange", hex: "#f97316" },
-  { key: "violet", label: "Violet", hex: "#a855f7" },
-  { key: "rose", label: "Rose", hex: "#ec4899" },
-  { key: "noir", label: "Noir", hex: "#111827" },
-  { key: "blanc", label: "Blanc", hex: "#ffffff" },
-  { key: "gris", label: "Gris", hex: "#9ca3af" },
-];
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+const randItem = <T,>(arr: T[]) => arr[Math.floor(Math.random() * arr.length)]
+const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n))
 
-const DEFAULT_TEXT_COLORS = ["#ef4444", "#22c55e", "#3b82f6", "#eab308"]; // rouge, vert, bleu, jaune
-const DEFAULT_BG_COLORS = ["#111827", "#ffffff", "#9ca3af"]; // noir, blanc, gris
+export default function App() {
+  const [mode, setMode] = useState<Mode>('stroop')
 
-const DIGITS = Array.from({ length: 10 }, (_, i) => i); // 0..9
-
-const DIRECTIONS: { label: string; char: string; key: string }[] = [
-  { key: "N", label: "Haut", char: "↑" },
-  { key: "E", label: "Droite", char: "→" },
-  { key: "S", label: "Bas", char: "↓" },
-  { key: "W", label: "Gauche", char: "←" },
-  { key: "NE", label: "Haut‑Droite", char: "↗" },
-  { key: "SE", label: "Bas‑Droite", char: "↘" },
-  { key: "SW", label: "Bas‑Gauche", char: "↙" },
-  { key: "NW", label: "Haut‑Gauche", char: "↖" },
-];
-
-// === UI subcomponents ===
-
-function ColorMultiPicker({
-  title,
-  selected,
-  onChange,
-  allowAddHex = false,
-}: {
-  title: string;
-  selected: string[]; // hex strings
-  onChange: (next: string[]) => void;
-  allowAddHex?: boolean;
-}) {
-  return (
-    <Card className="w-full">
-      <CardHeader className="py-3">
-        <CardTitle className="text-base">{title}</CardTitle>
-      </CardHeader>
-      <CardContent className="pt-0">
-        <div className="grid grid-cols-5 gap-2">
-          {PALETTE.map((c) => {
-            const active = selected.includes(c.hex);
-            return (
-              <button
-                key={c.key}
-                type="button"
-                onClick={() =>
-                  onChange(
-                    active
-                      ? selected.filter((x) => x !== c.hex)
-                      : [...selected, c.hex]
-                  )
-                }
-                className={`h-10 rounded-xl border flex items-center justify-center text-xs font-medium shadow-sm transition-all ${
-                  active ? "ring-2 ring-offset-2" : "opacity-80 hover:opacity-100"
-                }`}
-                style={{ backgroundColor: c.hex }}
-                aria-pressed={active}
-                title={c.label}
-              >
-                <span
-                  className="px-2 py-0.5 rounded-lg"
-                  style={{
-                    background: c.hex === "#ffffff" ? "#e5e7eb" : "rgba(255,255,255,0.65)",
-                    color: "#111827",
-                  }}
-                >
-                  {c.label}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-        {allowAddHex && (
-          <div className="mt-3 flex gap-2 items-center">
-            <Label htmlFor="hexadd" className="text-sm">Ajouter une couleur (hex)</Label>
-            <Input
-              id="hexadd"
-              placeholder="#00FFAA"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  const val = (e.target as HTMLInputElement).value.trim();
-                  if (/^#([0-9a-fA-F]{3}){1,2}$/.test(val)) {
-                    onChange(Array.from(new Set([...selected, val.toUpperCase()])));
-                    (e.target as HTMLInputElement).value = "";
-                  }
-                }
-              }}
-            />
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-function ChipsToggle<T extends string | number>({
-  title,
-  options,
-  selected,
-  onChange,
-  render,
-}: {
-  title: string;
-  options: T[];
-  selected: T[];
-  onChange: (next: T[]) => void;
-  render?: (v: T) => React.ReactNode;
-}) {
-  return (
-    <Card className="w-full">
-      <CardHeader className="py-3">
-        <CardTitle className="text-base">{title}</CardTitle>
-      </CardHeader>
-      <CardContent className="pt-0">
-        <div className="flex flex-wrap gap-2">
-          {options.map((opt, i) => {
-            const active = selected.includes(opt);
-            return (
-              <button
-                key={String(opt) + i}
-                type="button"
-                onClick={() =>
-                  onChange(
-                    active ? selected.filter((x) => x !== opt) : [...selected, opt]
-                  )
-                }
-                className={`px-3 py-2 rounded-xl border text-sm shadow-sm transition-all ${
-                  active ? "bg-primary text-primary-foreground" : "bg-background"
-                }`}
-                aria-pressed={active}
-              >
-                {render ? render(opt) : String(opt)}
-              </button>
-            );
-          })}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function NumberInput({
-  label,
-  value,
-  setValue,
-  min = 0,
-  max = 100000,
-  step = 1,
-  suffix,
-}: {
-  label: string;
-  value: number;
-  setValue: (n: number) => void;
-  min?: number;
-  max?: number;
-  step?: number;
-  suffix?: string;
-}) {
-  return (
-    <div className="grid grid-cols-2 items-center gap-3">
-      <Label className="text-sm">{label}</Label>
-      <div className="flex items-center gap-2">
-        <Input
-          type="number"
-          value={value}
-          onChange={(e) => setValue(clamp(parseInt(e.target.value || "0", 10), min, max))}
-          min={min}
-          max={max}
-          step={step}
-        />
-        {suffix && <span className="text-muted-foreground text-sm">{suffix}</span>}
-      </div>
-    </div>
-  );
-}
-
-// === Main component ===
-
-export default function NeuroReactApp() {
-  const [mode, setMode] = useState<Mode>("stroop");
-
-  // Common params
-  const [durationMs, setDurationMs] = useState(750);
-  const [intervalMs, setIntervalMs] = useState(750);
-  const [sets, setSets] = useState(3);
-  const [repsMode, setRepsMode] = useState<"count" | "time">("count");
-  const [repsCount, setRepsCount] = useState(20);
-  const [repsTimeSec, setRepsTimeSec] = useState(60);
-  const [restSec, setRestSec] = useState(30);
-  const [fontScale, setFontScale] = useState(1.0);
+  // Params communs
+  const [durationMs, setDurationMs] = useState(750)
+  const [intervalMs, setIntervalMs] = useState(750)
+  const [sets, setSets] = useState(3)
+  const [repsMode, setRepsMode] = useState<'count' | 'time'>('count')
+  const [repsCount, setRepsCount] = useState(20)
+  const [repsTimeSec, setRepsTimeSec] = useState(60)
+  const [restSec, setRestSec] = useState(30)
+  const [fontScale, setFontScale] = useState(1.0)
 
   // Audio
-  const [beep, setBeep] = useState(true);
-  const [beepFreq, setBeepFreq] = useState(1200);
-  const [beepDurMs, setBeepDurMs] = useState(80);
+  const [beep, setBeep] = useState(true)
+  const [beepFreq, setBeepFreq] = useState(1200)
+  const [beepDurMs, setBeepDurMs] = useState(80)
 
-  // Fullscreen
-  const [wantFullscreen, setWantFullscreen] = useState(false);
+  // Plein écran
+  const [wantFullscreen, setWantFullscreen] = useState(false)
 
-  // Selections
-  const [stroopColors, setStroopColors] = useState<string[]>(DEFAULT_TEXT_COLORS);
-  const [digitColors, setDigitColors] = useState<string[]>(DEFAULT_TEXT_COLORS);
-  const [onlyColors, setOnlyColors] = useState<string[]>(DEFAULT_TEXT_COLORS);
-  const [digits, setDigits] = useState<number[]>([1, 2, 3, 4, 5, 6, 7, 8, 9, 0]);
-  const [dirs, setDirs] = useState<string[]>(DIRECTIONS.map((d) => d.char));
+  // Sélections
+  const [stroopColors, setStroopColors] = useState<string[]>(DEFAULT_TEXT_COLORS)
+  const [digitColors, setDigitColors] = useState<string[]>(DEFAULT_TEXT_COLORS)
+  const [onlyColors, setOnlyColors] = useState<string[]>(DEFAULT_TEXT_COLORS)
+  const [digits, setDigits] = useState<number[]>([1, 2, 3, 4, 5, 6, 7, 8, 9, 0])
+  const [dirs, setDirs] = useState<string[]>(DIRECTIONS.map((d) => d.char))
+  const [bgColors, setBgColors] = useState<string[]>(DEFAULT_BG_COLORS)
+  const [fgColors, setFgColors] = useState<string[]>(DEFAULT_TEXT_COLORS)
 
-  const [bgColors, setBgColors] = useState<string[]>(DEFAULT_BG_COLORS);
-  const [fgColors, setFgColors] = useState<string[]>(DEFAULT_TEXT_COLORS);
+  // Runtime
+  const [running, setRunning] = useState(false)
+  const [paused, setPaused] = useState(false)
+  const [status, setStatus] = useState<'idle' | 'running' | 'rest' | 'finished'>('idle')
+  const [currentSet, setCurrentSet] = useState(0)
+  const [currentRep, setCurrentRep] = useState(0)
+  const [restCountdown, setRestCountdown] = useState(0)
+  const [stimulus, setStimulus] = useState<Stimulus | null>(null)
 
-  // Runtime state
-  const [running, setRunning] = useState(false);
-  const [paused, setPaused] = useState(false);
-  const [status, setStatus] = useState<"idle" | "running" | "rest" | "finished">("idle");
-  const [currentSet, setCurrentSet] = useState(0);
-  const [currentRep, setCurrentRep] = useState(0);
-  const [restCountdown, setRestCountdown] = useState(0);
-  const [stimulus, setStimulus] = useState<Stimulus | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const stopFlag = useRef(false)
+  const pauseRef = useRef(false)
+  const audioCtxRef = useRef<AudioContext | null>(null)
 
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const stopFlag = useRef(false);
-  const pauseRef = useRef(false);
-  const audioCtxRef = useRef<AudioContext | null>(null);
-
-  // Prepare AudioContext lazily
   useEffect(() => {
-    if (!audioCtxRef.current && typeof window !== "undefined") {
+    if (!audioCtxRef.current && typeof window !== 'undefined') {
       try {
-        audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+        // @ts-ignore
+        audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)()
       } catch (e) {
-        audioCtxRef.current = null;
+        audioCtxRef.current = null
       }
     }
-  }, []);
+  }, [])
 
   const playBeep = async () => {
-    if (!beep) return;
-    const ctx = audioCtxRef.current;
-    if (!ctx) return;
+    if (!beep) return
+    const ctx = audioCtxRef.current
+    if (!ctx) return
     try {
-      await ctx.resume();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.value = beepFreq;
-      gain.gain.value = 0.1; // gentle volume
-      osc.connect(gain).connect(ctx.destination);
-      osc.start();
+      await ctx.resume()
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = 'sine'
+      osc.frequency.value = beepFreq
+      gain.gain.value = 0.1
+      osc.connect(gain).connect(ctx.destination)
+      osc.start()
       setTimeout(() => {
-        osc.stop();
-        osc.disconnect();
-        gain.disconnect();
-      }, beepDurMs);
+        osc.stop()
+        osc.disconnect()
+        gain.disconnect()
+      }, beepDurMs)
     } catch {}
-  };
+  }
 
   const ensureFullscreen = async () => {
-    if (!wantFullscreen) return;
-    const el = containerRef.current;
-    if (!el) return;
+    if (!wantFullscreen) return
+    const el = containerRef.current
+    if (!el) return
     if (!document.fullscreenElement) {
-      try {
-        await el.requestFullscreen();
-      } catch {}
+      try { await el.requestFullscreen() } catch {}
     }
-  };
+  }
 
   const exitFullscreen = async () => {
     if (document.fullscreenElement) {
-      try {
-        await document.exitFullscreen();
-      } catch {}
+      try { await document.exitFullscreen() } catch {}
     }
-  };
+  }
 
-  // Stimulus generators per mode
   const nextStimulus = (): Stimulus => {
     switch (mode) {
-      case "stroop": {
-        const available = stroopColors.length ? stroopColors : DEFAULT_TEXT_COLORS;
-        const textColor = randItem(available);
-        // Choose a COLOR NAME from selected palette. Find its label.
-        const colorName = (() => {
-          const selectedSwatches = PALETTE.filter((p) => available.includes(p.hex));
-          const pick = randItem(selectedSwatches.length ? selectedSwatches : PALETTE);
-          return pick.label.toUpperCase();
-        })();
-        return { kind: "text", content: colorName, textColor, bgColor: undefined };
+      case 'stroop': {
+        const available = stroopColors.length ? stroopColors : DEFAULT_TEXT_COLORS
+        const textColor = randItem(available)
+        const selectedSwatches = NAMED_COLORS.filter(([_, hex]) => available.includes(hex))
+        const pick = (selectedSwatches.length ? selectedSwatches : NAMED_COLORS)[Math.floor(Math.random() * (selectedSwatches.length ? selectedSwatches.length : NAMED_COLORS.length))]
+        const colorName = (pick?.[0] || 'Couleur').toUpperCase()
+        return { kind: 'text', content: colorName, textColor }
       }
-      case "numbers": {
-        const d = randItem(digits.length ? digits : DIGITS);
-        const c = randItem(digitColors.length ? digitColors : DEFAULT_TEXT_COLORS);
-        return { kind: "text", content: String(d), textColor: c };
+      case 'numbers': {
+        const d = randItem(digits.length ? digits : DIGITS)
+        const c = randItem(digitColors.length ? digitColors : DEFAULT_TEXT_COLORS)
+        return { kind: 'text', content: String(d), textColor: c }
       }
-      case "color": {
-        const c = randItem(onlyColors.length ? onlyColors : DEFAULT_TEXT_COLORS);
-        return { kind: "block", bgColor: c };
+      case 'color': {
+        const c = randItem(onlyColors.length ? onlyColors : DEFAULT_TEXT_COLORS)
+        return { kind: 'block', bgColor: c }
       }
-      case "directions": {
-        const d = randItem(dirs.length ? dirs : DIRECTIONS.map((x) => x.char));
-        return { kind: "text", content: d, textColor: "#111827" };
+      case 'directions': {
+        const d = randItem(dirs.length ? dirs : DIRECTIONS.map((x) => x.char))
+        return { kind: 'text', content: d, textColor: '#111827' }
       }
-      case "numberColor": {
-        const bg = randItem(bgColors.length ? bgColors : DEFAULT_BG_COLORS);
-        const fg = randItem(fgColors.length ? fgColors : DEFAULT_TEXT_COLORS);
-        const d = randItem(digits.length ? digits : DIGITS);
-        return { kind: "text", content: String(d), textColor: fg, bgColor: bg };
+      case 'numberColor': {
+        const bg = randItem(bgColors.length ? bgColors : DEFAULT_BG_COLORS)
+        const fg = randItem(fgColors.length ? fgColors : DEFAULT_TEXT_COLORS)
+        const d = randItem(digits.length ? digits : DIGITS)
+        return { kind: 'text', content: String(d), textColor: fg, bgColor: bg }
       }
-      case "directionColor": {
-        const bg = randItem(bgColors.length ? bgColors : DEFAULT_BG_COLORS);
-        const fg = randItem(fgColors.length ? fgColors : DEFAULT_TEXT_COLORS);
-        const d = randItem(dirs.length ? dirs : DIRECTIONS.map((x) => x.char));
-        return { kind: "text", content: d, textColor: fg, bgColor: bg };
+      case 'directionColor': {
+        const bg = randItem(bgColors.length ? bgColors : DEFAULT_BG_COLORS)
+        const fg = randItem(fgColors.length ? fgColors : DEFAULT_TEXT_COLORS)
+        const d = randItem(dirs.length ? dirs : DIRECTIONS.map((x) => x.char))
+        return { kind: 'text', content: d, textColor: fg, bgColor: bg }
       }
       default:
-        return { kind: "text", content: "?", textColor: "#111827" };
+        return { kind: 'text', content: '?', textColor: '#111827' }
     }
-  };
+  }
 
-  const totalRepsPerSet = useMemo(() => (repsMode === "count" ? repsCount : undefined), [repsMode, repsCount]);
+  const totalRepsPerSet = useMemo(() => (repsMode === 'count' ? repsCount : undefined), [repsMode, repsCount])
 
-  // Core runner
   const runSession = async () => {
-    stopFlag.current = false;
-    pauseRef.current = false;
-    setRunning(true);
-    setPaused(false);
-    setStatus("running");
-    setCurrentSet(1);
-    setCurrentRep(0);
+    stopFlag.current = false
+    pauseRef.current = false
+    setRunning(true)
+    setPaused(false)
+    setStatus('running')
+    setCurrentSet(1)
+    setCurrentRep(0)
 
-    await ensureFullscreen();
-    await audioCtxRef.current?.resume?.();
+    await ensureFullscreen()
+    await audioCtxRef.current?.resume?.()
 
     for (let setIdx = 1; setIdx <= sets; setIdx++) {
-      if (stopFlag.current) break;
-      setCurrentSet(setIdx);
+      if (stopFlag.current) break
+      setCurrentSet(setIdx)
 
-      if (repsMode === "count") {
+      if (repsMode === 'count') {
         for (let rep = 1; rep <= repsCount; rep++) {
-          if (stopFlag.current) break;
-          // pause gate
-          while (pauseRef.current) await sleep(100);
-
-          // show stimulus
-          setStimulus(nextStimulus());
-          setCurrentRep(rep);
-          playBeep();
-          await sleep(durationMs);
-
-          // hide
-          setStimulus(null);
-          await sleep(intervalMs);
+          if (stopFlag.current) break
+          while (pauseRef.current) await sleep(100)
+          setStimulus(nextStimulus())
+          setCurrentRep(rep)
+          playBeep()
+          await sleep(durationMs)
+          setStimulus(null)
+          await sleep(intervalMs)
         }
       } else {
-        // time mode
-        const endAt = Date.now() + repsTimeSec * 1000;
-        let rep = 0;
+        const endAt = Date.now() + repsTimeSec * 1000
+        let rep = 0
         while (Date.now() < endAt) {
-          if (stopFlag.current) break;
-          while (pauseRef.current) await sleep(100);
-          rep++;
-          setCurrentRep(rep);
-          setStimulus(nextStimulus());
-          playBeep();
-          await sleep(durationMs);
-          setStimulus(null);
-          await sleep(intervalMs);
+          if (stopFlag.current) break
+          while (pauseRef.current) await sleep(100)
+          rep++
+          setCurrentRep(rep)
+          setStimulus(nextStimulus())
+          playBeep()
+          await sleep(durationMs)
+          setStimulus(null)
+          await sleep(intervalMs)
         }
       }
 
       if (setIdx < sets && !stopFlag.current) {
-        setStatus("rest");
-        // recovery countdown
+        setStatus('rest')
         for (let t = restSec; t > 0; t--) {
-          setRestCountdown(t);
-          await sleep(1000);
-          if (stopFlag.current) break;
+          setRestCountdown(t)
+          await sleep(1000)
+          if (stopFlag.current) break
         }
-        setStatus("running");
+        setStatus('running')
       }
     }
 
-    setStimulus(null);
-    setRunning(false);
-    setPaused(false);
-    setStatus("finished");
-    setCurrentRep(0);
-    await exitFullscreen();
-  };
+    setStimulus(null)
+    setRunning(false)
+    setPaused(false)
+    setStatus('finished')
+    setCurrentRep(0)
+    await exitFullscreen()
+  }
 
-  const handleStart = () => {
-    if (running) return;
-    runSession();
-  };
-
+  const handleStart = () => { if (!running) runSession() }
   const handleStop = async () => {
-    stopFlag.current = true;
-    setRunning(false);
-    setPaused(false);
-    setStatus("idle");
-    setStimulus(null);
-    setCurrentRep(0);
-    await exitFullscreen();
-  };
-
+    stopFlag.current = true
+    setRunning(false)
+    setPaused(false)
+    setStatus('idle')
+    setStimulus(null)
+    setCurrentRep(0)
+    await exitFullscreen()
+  }
   const handlePauseToggle = () => {
-    if (!running) return;
-    const nv = !paused;
-    setPaused(nv);
-    pauseRef.current = nv;
-  };
+    if (!running) return
+    const nv = !paused
+    setPaused(nv)
+    pauseRef.current = nv
+  }
 
   const progressPerc = useMemo(() => {
-    if (status === "running" && repsMode === "count" && totalRepsPerSet) {
-      const pctPerSet = 100 / sets;
-      const repsPct = (currentRep / totalRepsPerSet) * pctPerSet;
-      return clamp((currentSet - 1) * pctPerSet + repsPct, 0, 100);
+    if (status === 'running' && repsMode === 'count' && totalRepsPerSet) {
+      const pctPerSet = 100 / sets
+      const repsPct = (currentRep / totalRepsPerSet) * pctPerSet
+      return clamp((currentSet - 1) * pctPerSet + repsPct, 0, 100)
     }
-    return status === "finished" ? 100 : currentSet > 0 ? (currentSet / sets) * 100 : 0;
-  }, [status, repsMode, totalRepsPerSet, currentRep, currentSet, sets]);
+    return status === 'finished' ? 100 : currentSet > 0 ? (currentSet / sets) * 100 : 0
+  }, [status, repsMode, totalRepsPerSet, currentRep, currentSet, sets])
 
-  // === UI ===
-  return (
-    <div ref={containerRef} className="w-full h-full p-3 sm:p-6 grid grid-cols-1 xl:grid-cols-3 gap-4">
-      {/* Left column: Controls */}
-      <div className="xl:col-span-1 space-y-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-xl">Paramètres</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 gap-3">
-              <div className="grid grid-cols-2 items-center gap-3">
-                <Label>Mode</Label>
-                <Select value={mode} onValueChange={(v: Mode) => setMode(v)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Choisir un mode" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="stroop">Stroop</SelectItem>
-                    <SelectItem value="numbers">Chiffres</SelectItem>
-                    <SelectItem value="color">Couleur</SelectItem>
-                    <SelectItem value="directions">Directions</SelectItem>
-                    <SelectItem value="numberColor">Chiffre + Couleur</SelectItem>
-                    <SelectItem value="directionColor">Direction + Couleur</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <Separator />
-
-              <NumberInput label="Durée d'apparition" value={durationMs} setValue={setDurationMs} min={50} max={10000} step={10} suffix="ms" />
-              <NumberInput label="Intervalle entre apparitions" value={intervalMs} setValue={setIntervalMs} min={0} max={20000} step={10} suffix="ms" />
-              <NumberInput label="Nombre de sets" value={sets} setValue={setSets} min={1} max={20} step={1} />
-
-              <div className="grid grid-cols-2 items-center gap-3">
-                <Label>Répétitions</Label>
-                <Select value={repsMode} onValueChange={(v: any) => setRepsMode(v)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="count">Par nombre</SelectItem>
-                    <SelectItem value="time">Par durée</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {repsMode === "count" ? (
-                <NumberInput label="Nombre d'apparitions" value={repsCount} setValue={setRepsCount} min={1} max={2000} step={1} />
-              ) : (
-                <NumberInput label="Durée d'un set" value={repsTimeSec} setValue={setRepsTimeSec} min={5} max={3600} step={1} suffix="sec" />
-              )}
-
-              <NumberInput label="Récupération" value={restSec} setValue={setRestSec} min={0} max={600} step={1} suffix="sec" />
-
-              <div className="grid grid-cols-2 items-center gap-3">
-                <Label>Police (taille relative)</Label>
-                <div className="px-2">
-                  <Slider
-                    value={[fontScale]}
-                    onValueChange={(v) => setFontScale(v[0])}
-                    min={0.5}
-                    max={2.0}
-                    step={0.05}
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 items-center gap-3">
-                <Label>Beep audio</Label>
-                <div className="flex items-center gap-2">
-                  <Switch checked={beep} onCheckedChange={setBeep} />
-                  {beep ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
-                </div>
-              </div>
-              {beep && (
-                <div className="grid grid-cols-2 gap-3">
-                  <NumberInput label="Fréquence" value={beepFreq} setValue={setBeepFreq} min={100} max={4000} step={10} suffix="Hz" />
-                  <NumberInput label="Durée du beep" value={beepDurMs} setValue={setBeepDurMs} min={20} max={500} step={5} suffix="ms" />
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 items-center gap-3">
-                <Label>Plein écran à la lecture</Label>
-                <div className="flex items-center gap-2">
-                  <Switch checked={wantFullscreen} onCheckedChange={setWantFullscreen} />
-                  {wantFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Mode-specific selectors */}
-        {mode === "stroop" && (
-          <ColorMultiPicker title="Couleurs (pour le texte et les mots)" selected={stroopColors} onChange={setStroopColors} allowAddHex />
-        )}
-
-        {mode === "numbers" && (
-          <div className="space-y-4">
-            <ColorMultiPicker title="Couleurs du chiffre" selected={digitColors} onChange={setDigitColors} allowAddHex />
-            <ChipsToggle<number>
-              title="Sélection des chiffres"
-              options={DIGITS}
-              selected={digits}
-              onChange={setDigits}
+  // Helpers de rendu
+  const CheckboxList = ({
+    title,
+    options,
+    selected,
+    onToggle,
+    render
+  }: {
+    title: string
+    options: string[]
+    selected: string[]
+    onToggle: (v: string) => void
+    render?: (v: string) => React.ReactNode
+  }) => (
+    <div className="card" style={{ marginTop: 12 }}>
+      <h3 style={{ marginTop: 0 }}>{title}</h3>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        {options.map((opt) => (
+          <label key={opt} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 10px', border: '1px solid #e5e7eb', borderRadius: 10 }}>
+            <input
+              type="checkbox"
+              checked={selected.includes(opt)}
+              onChange={() => onToggle(opt)}
             />
+            <span>{render ? render(opt) : opt}</span>
+          </label>
+        ))}
+      </div>
+    </div>
+  )
+
+  const ColorPicker = ({ title, selected, setSelected }: { title: string; selected: string[]; setSelected: (next: string[]) => void }) => (
+    <div className="card" style={{ marginTop: 12 }}>
+      <h3 style={{ marginTop: 0 }}>{title}</h3>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        {NAMED_COLORS.map(([name, hex]) => {
+          const active = selected.includes(hex)
+          return (
+            <button key={hex} type="button" onClick={() => setSelected(active ? selected.filter((x) => x !== hex) : [...selected, hex])} style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 6, display: 'inline-flex', alignItems: 'center', gap: 8, background: active ? '#f1f5f9' : '#fff' }}>
+              <span style={{ width: 18, height: 18, borderRadius: 6, background: hex, display: 'inline-block', border: '1px solid rgba(0,0,0,0.1)' }} />
+              <span>{name}</span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+
+  return (
+    <div className="container" style={{ maxWidth: 1200, margin: '0 auto', padding: 12 }} ref={containerRef}>
+      <h1 style={{ margin: '8px 0 12px' }}>NeuroReact — entraînement cognitif</h1>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 12 }}>
+        {/* Colonne paramètres */}
+        <div>
+          <div className="card">
+            <h3 style={{ marginTop: 0 }}>Paramètres</h3>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <label>
+                Mode<br />
+                <select value={mode} onChange={(e) => setMode(e.target.value as Mode)}>
+                  <option value="stroop">Stroop</option>
+                  <option value="numbers">Chiffres</option>
+                  <option value="color">Couleur</option>
+                  <option value="directions">Directions</option>
+                  <option value="numberColor">Chiffre + Couleur</option>
+                  <option value="directionColor">Direction + Couleur</option>
+                </select>
+              </label>
+
+              <label>
+                Durée d'apparition (ms)
+                <input type="number" value={durationMs} onChange={(e) => setDurationMs(clamp(parseInt(e.target.value || '0', 10), 50, 10000))} min={50} max={10000} step={10} />
+              </label>
+
+              <label>
+                Intervalle (ms)
+                <input type="number" value={intervalMs} onChange={(e) => setIntervalMs(clamp(parseInt(e.target.value || '0', 10), 0, 20000))} min={0} max={20000} step={10} />
+              </label>
+
+              <label>
+                Nombre de sets
+                <input type="number" value={sets} onChange={(e) => setSets(clamp(parseInt(e.target.value || '0', 10), 1, 20))} min={1} max={20} />
+              </label>
+
+              <label>
+                Répétitions (mode)
+                <select value={repsMode} onChange={(e) => setRepsMode(e.target.value as any)}>
+                  <option value="count">Par nombre</option>
+                  <option value="time">Par durée</option>
+                </select>
+              </label>
+
+              {repsMode === 'count' ? (
+                <label>
+                  Nombre d'apparitions
+                  <input type="number" value={repsCount} onChange={(e) => setRepsCount(clamp(parseInt(e.target.value || '0', 10), 1, 2000))} min={1} max={2000} />
+                </label>
+              ) : (
+                <label>
+                  Durée d'un set (sec)
+                  <input type="number" value={repsTimeSec} onChange={(e) => setRepsTimeSec(clamp(parseInt(e.target.value || '0', 10), 5, 3600))} min={5} max={3600} />
+                </label>
+              )}
+
+              <label>
+                Récupération (sec)
+                <input type="number" value={restSec} onChange={(e) => setRestSec(clamp(parseInt(e.target.value || '0', 10), 0, 600))} min={0} max={600} />
+              </label>
+
+              <label>
+                Taille texte (×)
+                <input type="range" min={0.5} max={2} step={0.05} value={fontScale} onChange={(e) => setFontScale(parseFloat(e.target.value))} />
+              </label>
+
+              <label>
+                Beep audio
+                <input type="checkbox" checked={beep} onChange={(e) => setBeep(e.target.checked)} />
+              </label>
+
+              {beep && (
+                <>
+                  <label>
+                    Fréquence (Hz)
+                    <input type="number" value={beepFreq} onChange={(e) => setBeepFreq(clamp(parseInt(e.target.value || '0', 10), 100, 4000))} min={100} max={4000} step={10} />
+                  </label>
+                  <label>
+                    Durée beep (ms)
+                    <input type="number" value={beepDurMs} onChange={(e) => setBeepDurMs(clamp(parseInt(e.target.value || '0', 10), 20, 500))} min={20} max={500} step={5} />
+                  </label>
+                </>
+              )}
+
+              <label>
+                Plein écran à la lecture
+                <input type="checkbox" checked={wantFullscreen} onChange={(e) => setWantFullscreen(e.target.checked)} />
+              </label>
+            </div>
           </div>
-        )}
 
-        {mode === "color" && (
-          <ColorMultiPicker title="Couleurs à afficher" selected={onlyColors} onChange={setOnlyColors} allowAddHex />
-        )}
+          {/* Sélecteurs spécifiques */}
+          {mode === 'stroop' && (
+            <ColorPicker title="Couleurs (texte & mots)" selected={stroopColors} setSelected={setStroopColors} />
+          )}
 
-        {mode === "directions" && (
-          <ChipsToggle<string>
-            title="Directions disponibles"
-            options={DIRECTIONS.map((d) => d.char)}
-            selected={dirs}
-            onChange={setDirs}
-            render={(c) => <span className="text-lg">{c}</span>}
-          />
-        )}
+          {mode === 'numbers' && (
+            <>
+              <ColorPicker title="Couleurs du chiffre" selected={digitColors} setSelected={setDigitColors} />
+              <CheckboxList
+                title="Chiffres"
+                options={DIGITS.map(String)}
+                selected={digits.map(String)}
+                onToggle={(v) => setDigits((cur) => (cur.includes(Number(v)) ? cur.filter((x) => x !== Number(v)) : [...cur, Number(v)]))}
+              />
+            </>
+          )}
 
-        {mode === "numberColor" && (
-          <div className="space-y-4">
-            <ColorMultiPicker title="Couleurs de fond" selected={bgColors} onChange={setBgColors} allowAddHex />
-            <ColorMultiPicker title="Couleurs du chiffre" selected={fgColors} onChange={setFgColors} allowAddHex />
-            <ChipsToggle<number> title="Chiffres" options={DIGITS} selected={digits} onChange={setDigits} />
-          </div>
-        )}
+          {mode === 'color' && (
+            <ColorPicker title="Couleurs à afficher" selected={onlyColors} setSelected={setOnlyColors} />
+          )}
 
-        {mode === "directionColor" && (
-          <div className="space-y-4">
-            <ColorMultiPicker title="Couleurs de fond" selected={bgColors} onChange={setBgColors} allowAddHex />
-            <ColorMultiPicker title="Couleurs de la flèche" selected={fgColors} onChange={setFgColors} allowAddHex />
-            <ChipsToggle<string>
+          {mode === 'directions' && (
+            <CheckboxList
               title="Directions"
               options={DIRECTIONS.map((d) => d.char)}
               selected={dirs}
-              onChange={setDirs}
-              render={(c) => <span className="text-lg">{c}</span>}
+              onToggle={(v) => setDirs((cur) => (cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]))}
+              render={(c) => <span style={{ fontSize: 20 }}>{c}</span>}
             />
-          </div>
-        )}
-      </div>
+          )}
 
-      {/* Right column: Preview/Player */}
-      <div className="xl:col-span-2 grid grid-rows-[auto,1fr,auto] gap-4">
-        <Card className="h-full">
-          <CardHeader className="pb-2">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-xl">Aire de stimulus</CardTitle>
-              <div className="flex items-center gap-2">
-                <Button size="sm" variant={paused ? "secondary" : "default"} onClick={handlePauseToggle} disabled={!running}>
-                  {paused ? (
-                    <>
-                      <Play className="w-4 h-4 mr-1" /> Reprendre
-                    </>
-                  ) : (
-                    <>
-                      <Pause className="w-4 h-4 mr-1" /> Pause
-                    </>
-                  )}
-                </Button>
-                <Button size="sm" variant="destructive" onClick={handleStop} disabled={!running}>
-                  <Square className="w-4 h-4 mr-1" /> Stop
-                </Button>
-                <Button size="sm" onClick={handleStart} disabled={running}>
-                  <Play className="w-4 h-4 mr-1" /> Démarrer
-                </Button>
-              </div>
+          {mode === 'numberColor' && (
+            <>
+              <ColorPicker title="Couleurs de fond" selected={bgColors} setSelected={setBgColors} />
+              <ColorPicker title="Couleurs du chiffre" selected={fgColors} setSelected={setFgColors} />
+              <CheckboxList
+                title="Chiffres"
+                options={DIGITS.map(String)}
+                selected={digits.map(String)}
+                onToggle={(v) => setDigits((cur) => (cur.includes(Number(v)) ? cur.filter((x) => x !== Number(v)) : [...cur, Number(v)]))}
+              />
+            </>
+          )}
+
+          {mode === 'directionColor' && (
+            <>
+              <ColorPicker title="Couleurs de fond" selected={bgColors} setSelected={setBgColors} />
+              <ColorPicker title="Couleurs de la flèche" selected={fgColors} setSelected={setFgColors} />
+              <CheckboxList
+                title="Directions"
+                options={DIRECTIONS.map((d) => d.char)}
+                selected={dirs}
+                onToggle={(v) => setDirs((cur) => (cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]))}
+                render={(c) => <span style={{ fontSize: 20 }}>{c}</span>}
+              />
+            </>
+          )}
+        </div>
+
+        {/* Colonne aire de stimulus */}
+        <div>
+          <div className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <button onClick={handleStart} disabled={running} style={{ padding: '8px 12px', borderRadius: 10, border: '1px solid #e5e7eb', marginRight: 8 }}>Démarrer</button>
+              <button onClick={handlePauseToggle} disabled={!running} style={{ padding: '8px 12px', borderRadius: 10, border: '1px solid #e5e7eb', marginRight: 8 }}>{paused ? 'Reprendre' : 'Pause'}</button>
+              <button onClick={handleStop} disabled={!running} style={{ padding: '8px 12px', borderRadius: 10, border: '1px solid #e5e7eb' }}>Stop</button>
             </div>
-          </CardHeader>
-          <CardContent>
-            <div
-              className="relative w-full h-[55vh] sm:h-[60vh] md:h-[65vh] lg:h-[70vh] xl:h-[72vh] rounded-2xl border bg-muted flex items-center justify-center overflow-hidden"
-              style={{ backgroundColor: stimulus?.bgColor ?? undefined }}
-            >
-              {/* Blank stage grid for alignment */}
-              <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(rgba(0,0,0,0.03)_1px,transparent_1px)] [background-size:16px_16px]" />
+            <div style={{ fontSize: 12, color: '#6b7280' }}>
+              {status === 'running' && (<span>Set {currentSet}/{sets} • Rep {currentRep}{repsMode === 'count' ? `/${repsCount}` : ''}</span>)}
+              {status === 'rest' && (<span>Récupération : {restCountdown}s</span>)}
+              {status === 'finished' && (<span>Terminé</span>)}
+              {status === 'idle' && (<span>Prêt</span>)}
+            </div>
+          </div>
+
+          <div className="card" style={{ height: '70vh', position: 'relative', overflow: 'hidden' , background: stimulus?.bgColor || '#f8fafc'}}>
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               {stimulus ? (
-                stimulus.kind === "block" ? (
-                  <div className="w-full h-full" />
+                stimulus.kind === 'block' ? (
+                  <div style={{ width: '100%', height: '100%' }} />
                 ) : (
-                  <div
-                    className="font-bold select-none text-center"
-                    style={{
-                      color: stimulus.textColor || "#111827",
-                      fontSize: `${Math.round(fontScale * 12)}vw`,
-                      lineHeight: 1,
-                      textShadow: "0 2px 12px rgba(0,0,0,0.15)",
-                    }}
-                  >
+                  <div style={{
+                    fontWeight: 800,
+                    color: stimulus.textColor || '#111827',
+                    fontSize: `${Math.round(fontScale * 12)}vw`,
+                    lineHeight: 1,
+                    textShadow: '0 2px 12px rgba(0,0,0,0.15)',
+                    userSelect: 'none',
+                    textAlign: 'center'
+                  }}>
                     {stimulus.content}
                   </div>
                 )
               ) : (
-                <div className="text-muted-foreground text-sm">En attente…</div>
+                <div style={{ color: '#6b7280' }}>En attente…</div>
               )}
-
-              {/* Status badges */}
-              <div className="absolute top-3 left-3 text-xs px-2 py-1 rounded-lg bg-white/70 shadow-sm">
-                {status === "running" && <span>Set {currentSet} / {sets} • Rep {currentRep}{repsMode === "count" ? `/${repsCount}` : ""}</span>}
-                {status === "rest" && <span>Récupération : {restCountdown}s</span>}
-                {status === "finished" && <span>Terminé</span>}
-                {status === "idle" && <span>Prêt</span>}
-              </div>
             </div>
-          </CardContent>
-        </Card>
-
-        <div className="space-y-2">
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Progression</span>
-            <span className="tabular-nums">{Math.round(progressPerc)}%</span>
           </div>
-          <Progress value={progressPerc} />
-        </div>
 
-        <Card>
-          <CardContent className="pt-4">
-            <ul className="text-sm text-muted-foreground list-disc pl-5 space-y-1">
-              <li>Le stimulus reste affiché pendant la <strong>"Durée d'apparition"</strong>, puis l'écran est vide pendant l'<strong>"Intervalle"</strong>.</li>
-              <li>Le mode <strong>Par nombre</strong> exécute un nombre d'apparitions fixe par set. Le mode <strong>Par durée</strong> répète jusqu'à la fin du temps indiqué.</li>
-              <li>Activez <strong>"Plein écran"</strong> pour l'entraînement en mobilité (smartphone/tablette).</li>
-              <li>Le <strong>bip</strong> utilise l'API Web Audio (déclenché au clic sur Démarrer pour respecter les règles des navigateurs).</li>
+          <div style={{ marginTop: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#6b7280' }}>
+              <span>Progression</span>
+              <span>{Math.round(progressPerc)}%</span>
+            </div>
+            <div style={{ height: 10, background: '#e5e7eb', borderRadius: 9999, overflow: 'hidden' }}>
+              <div style={{ width: `${progressPerc}%`, height: '100%', background: '#3b82f6' }} />
+            </div>
+          </div>
+
+          <div className="card" style={{ marginTop: 12, fontSize: 14, color: '#4b5563' }}>
+            <ul>
+              <li>Le stimulus s’affiche pendant la <b>durée</b>, puis l’écran est vide pendant l’<b>intervalle</b>.</li>
+              <li>En mode <b>Par nombre</b>, chaque set affiche un nombre fixe d’apparitions. En mode <b>Par durée</b>, le set se termine au temps indiqué.</li>
+              <li>Le <b>bip</b> nécessite un clic utilisateur (bouton Démarrer) pour être autorisé par le navigateur mobile.</li>
+              <li>Active le <b>plein écran</b> pour un entraînement sans distraction.</li>
             </ul>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
     </div>
-  );
+  )
 }
+
