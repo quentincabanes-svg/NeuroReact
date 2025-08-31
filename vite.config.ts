@@ -3,5 +3,5 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
-  base: "/neuroreact/", // ex: "/neuroreact/"
+  base: "/NeuroReact/", // ex: "/neuroreact/"
 });
