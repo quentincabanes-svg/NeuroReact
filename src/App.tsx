@@ -1,12 +1,13 @@
 
+
 // =============================
-// VERSION SANS DÉPENDANCES (copie-colle dans src/App.tsx)
+// VERSION SANS DÉPENDANCES (copie-colle dans src/App.tsx) — MÀJ MOBILE
 // =============================
-//
 // Cette version n’utilise AUCUNE bibliothèque UI (pas de shadcn, pas d’icônes).
-// Elle fonctionne sur GitHub Pages avec Vite + React uniquement.
-// Conserve ton index.html, vite.config.ts, tsconfig.json, package.json comme indiqués.
-// Remplace simplement le contenu de src/App.tsx par ce fichier.
+// Améliorations mobile :
+// - Le lecteur (zone d'apparition) passe AVANT les paramètres sur petit écran.
+// - En session, les paramètres sont masqués sur petit écran pour éviter le défilement.
+// - Le plein écran vise la zone de stimulus et on fait un scroll automatique dessus au démarrage.
 
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 
@@ -91,6 +92,7 @@ export default function App() {
   const [stimulus, setStimulus] = useState<Stimulus | null>(null)
 
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const playerRef = useRef<HTMLDivElement | null>(null)
   const stopFlag = useRef(false)
   const pauseRef = useRef(false)
   const audioCtxRef = useRef<AudioContext | null>(null)
@@ -104,6 +106,15 @@ export default function App() {
         audioCtxRef.current = null
       }
     }
+  }, [])
+
+  // détecte l'écran étroit (smartphone/tablette)
+  const [isSmall, setIsSmall] = useState(false)
+  useEffect(() => {
+    const onResize = () => setIsSmall(typeof window !== 'undefined' ? window.innerWidth < 900 : false)
+    onResize()
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
   }, [])
 
   const playBeep = async () => {
@@ -129,10 +140,10 @@ export default function App() {
 
   const ensureFullscreen = async () => {
     if (!wantFullscreen) return
-    const el = containerRef.current
+    const el = playerRef.current || containerRef.current
     if (!el) return
     if (!document.fullscreenElement) {
-      try { await el.requestFullscreen() } catch {}
+      try { await (el as any).requestFullscreen?.() } catch {}
     }
   }
 
@@ -148,7 +159,8 @@ export default function App() {
         const available = stroopColors.length ? stroopColors : DEFAULT_TEXT_COLORS
         const textColor = randItem(available)
         const selectedSwatches = NAMED_COLORS.filter(([_, hex]) => available.includes(hex))
-        const pick = (selectedSwatches.length ? selectedSwatches : NAMED_COLORS)[Math.floor(Math.random() * (selectedSwatches.length ? selectedSwatches.length : NAMED_COLORS.length))]
+        const list = selectedSwatches.length ? selectedSwatches : NAMED_COLORS
+        const pick = list[Math.floor(Math.random() * list.length)]
         const colorName = (pick?.[0] || 'Couleur').toUpperCase()
         return { kind: 'text', content: colorName, textColor }
       }
@@ -194,6 +206,7 @@ export default function App() {
     setCurrentRep(0)
 
     await ensureFullscreen()
+    try { playerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }) } catch {}
     await audioCtxRef.current?.resume?.()
 
     for (let setIdx = 1; setIdx <= sets; setIdx++) {
@@ -324,156 +337,9 @@ export default function App() {
     <div className="container" style={{ maxWidth: 1200, margin: '0 auto', padding: 12 }} ref={containerRef}>
       <h1 style={{ margin: '8px 0 12px' }}>NeuroReact — entraînement cognitif</h1>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 12 }}>
-        {/* Colonne paramètres */}
-        <div>
-          <div className="card">
-            <h3 style={{ marginTop: 0 }}>Paramètres</h3>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              <label>
-                Mode<br />
-                <select value={mode} onChange={(e) => setMode(e.target.value as Mode)}>
-                  <option value="stroop">Stroop</option>
-                  <option value="numbers">Chiffres</option>
-                  <option value="color">Couleur</option>
-                  <option value="directions">Directions</option>
-                  <option value="numberColor">Chiffre + Couleur</option>
-                  <option value="directionColor">Direction + Couleur</option>
-                </select>
-              </label>
-
-              <label>
-                Durée d'apparition (ms)
-                <input type="number" value={durationMs} onChange={(e) => setDurationMs(clamp(parseInt(e.target.value || '0', 10), 50, 10000))} min={50} max={10000} step={10} />
-              </label>
-
-              <label>
-                Intervalle (ms)
-                <input type="number" value={intervalMs} onChange={(e) => setIntervalMs(clamp(parseInt(e.target.value || '0', 10), 0, 20000))} min={0} max={20000} step={10} />
-              </label>
-
-              <label>
-                Nombre de sets
-                <input type="number" value={sets} onChange={(e) => setSets(clamp(parseInt(e.target.value || '0', 10), 1, 20))} min={1} max={20} />
-              </label>
-
-              <label>
-                Répétitions (mode)
-                <select value={repsMode} onChange={(e) => setRepsMode(e.target.value as any)}>
-                  <option value="count">Par nombre</option>
-                  <option value="time">Par durée</option>
-                </select>
-              </label>
-
-              {repsMode === 'count' ? (
-                <label>
-                  Nombre d'apparitions
-                  <input type="number" value={repsCount} onChange={(e) => setRepsCount(clamp(parseInt(e.target.value || '0', 10), 1, 2000))} min={1} max={2000} />
-                </label>
-              ) : (
-                <label>
-                  Durée d'un set (sec)
-                  <input type="number" value={repsTimeSec} onChange={(e) => setRepsTimeSec(clamp(parseInt(e.target.value || '0', 10), 5, 3600))} min={5} max={3600} />
-                </label>
-              )}
-
-              <label>
-                Récupération (sec)
-                <input type="number" value={restSec} onChange={(e) => setRestSec(clamp(parseInt(e.target.value || '0', 10), 0, 600))} min={0} max={600} />
-              </label>
-
-              <label>
-                Taille texte (×)
-                <input type="range" min={0.5} max={2} step={0.05} value={fontScale} onChange={(e) => setFontScale(parseFloat(e.target.value))} />
-              </label>
-
-              <label>
-                Beep audio
-                <input type="checkbox" checked={beep} onChange={(e) => setBeep(e.target.checked)} />
-              </label>
-
-              {beep && (
-                <>
-                  <label>
-                    Fréquence (Hz)
-                    <input type="number" value={beepFreq} onChange={(e) => setBeepFreq(clamp(parseInt(e.target.value || '0', 10), 100, 4000))} min={100} max={4000} step={10} />
-                  </label>
-                  <label>
-                    Durée beep (ms)
-                    <input type="number" value={beepDurMs} onChange={(e) => setBeepDurMs(clamp(parseInt(e.target.value || '0', 10), 20, 500))} min={20} max={500} step={5} />
-                  </label>
-                </>
-              )}
-
-              <label>
-                Plein écran à la lecture
-                <input type="checkbox" checked={wantFullscreen} onChange={(e) => setWantFullscreen(e.target.checked)} />
-              </label>
-            </div>
-          </div>
-
-          {/* Sélecteurs spécifiques */}
-          {mode === 'stroop' && (
-            <ColorPicker title="Couleurs (texte & mots)" selected={stroopColors} setSelected={setStroopColors} />
-          )}
-
-          {mode === 'numbers' && (
-            <>
-              <ColorPicker title="Couleurs du chiffre" selected={digitColors} setSelected={setDigitColors} />
-              <CheckboxList
-                title="Chiffres"
-                options={DIGITS.map(String)}
-                selected={digits.map(String)}
-                onToggle={(v) => setDigits((cur) => (cur.includes(Number(v)) ? cur.filter((x) => x !== Number(v)) : [...cur, Number(v)]))}
-              />
-            </>
-          )}
-
-          {mode === 'color' && (
-            <ColorPicker title="Couleurs à afficher" selected={onlyColors} setSelected={setOnlyColors} />
-          )}
-
-          {mode === 'directions' && (
-            <CheckboxList
-              title="Directions"
-              options={DIRECTIONS.map((d) => d.char)}
-              selected={dirs}
-              onToggle={(v) => setDirs((cur) => (cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]))}
-              render={(c) => <span style={{ fontSize: 20 }}>{c}</span>}
-            />
-          )}
-
-          {mode === 'numberColor' && (
-            <>
-              <ColorPicker title="Couleurs de fond" selected={bgColors} setSelected={setBgColors} />
-              <ColorPicker title="Couleurs du chiffre" selected={fgColors} setSelected={setFgColors} />
-              <CheckboxList
-                title="Chiffres"
-                options={DIGITS.map(String)}
-                selected={digits.map(String)}
-                onToggle={(v) => setDigits((cur) => (cur.includes(Number(v)) ? cur.filter((x) => x !== Number(v)) : [...cur, Number(v)]))}
-              />
-            </>
-          )}
-
-          {mode === 'directionColor' && (
-            <>
-              <ColorPicker title="Couleurs de fond" selected={bgColors} setSelected={setBgColors} />
-              <ColorPicker title="Couleurs de la flèche" selected={fgColors} setSelected={setFgColors} />
-              <CheckboxList
-                title="Directions"
-                options={DIRECTIONS.map((d) => d.char)}
-                selected={dirs}
-                onToggle={(v) => setDirs((cur) => (cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]))}
-                render={(c) => <span style={{ fontSize: 20 }}>{c}</span>}
-              />
-            </>
-          )}
-        </div>
-
-        {/* Colonne aire de stimulus */}
-        <div>
+      <div style={{ display: 'grid', gridTemplateColumns: isSmall ? '1fr' : '2fr 1fr', gap: 12 }}>
+        {/* Colonne aire de stimulus (d'abord sur mobile) */}
+        <div ref={playerRef}>
           <div className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
               <button onClick={handleStart} disabled={running} style={{ padding: '8px 12px', borderRadius: 10, border: '1px solid #e5e7eb', marginRight: 8 }}>Démarrer</button>
@@ -531,8 +397,156 @@ export default function App() {
             </ul>
           </div>
         </div>
+
+        {/* Colonne paramètres (cachée pendant la session sur mobile) */}
+        {(!running || !isSmall) && (
+          <div>
+            <div className="card">
+              <h3 style={{ marginTop: 0 }}>Paramètres</h3>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <label>
+                  Mode<br />
+                  <select value={mode} onChange={(e) => setMode(e.target.value as Mode)}>
+                    <option value="stroop">Stroop</option>
+                    <option value="numbers">Chiffres</option>
+                    <option value="color">Couleur</option>
+                    <option value="directions">Directions</option>
+                    <option value="numberColor">Chiffre + Couleur</option>
+                    <option value="directionColor">Direction + Couleur</option>
+                  </select>
+                </label>
+
+                <label>
+                  Durée d'apparition (ms)
+                  <input type="number" value={durationMs} onChange={(e) => setDurationMs(clamp(parseInt(e.target.value || '0', 10), 50, 10000))} min={50} max={10000} step={10} />
+                </label>
+
+                <label>
+                  Intervalle (ms)
+                  <input type="number" value={intervalMs} onChange={(e) => setIntervalMs(clamp(parseInt(e.target.value || '0', 10), 0, 20000))} min={0} max={20000} step={10} />
+                </label>
+
+                <label>
+                  Nombre de sets
+                  <input type="number" value={sets} onChange={(e) => setSets(clamp(parseInt(e.target.value || '0', 10), 1, 20))} min={1} max={20} />
+                </label>
+
+                <label>
+                  Répétitions (mode)
+                  <select value={repsMode} onChange={(e) => setRepsMode(e.target.value as any)}>
+                    <option value="count">Par nombre</option>
+                    <option value="time">Par durée</option>
+                  </select>
+                </label>
+
+                {repsMode === 'count' ? (
+                  <label>
+                    Nombre d'apparitions
+                    <input type="number" value={repsCount} onChange={(e) => setRepsCount(clamp(parseInt(e.target.value || '0', 10), 1, 2000))} min={1} max={2000} />
+                  </label>
+                ) : (
+                  <label>
+                    Durée d'un set (sec)
+                    <input type="number" value={repsTimeSec} onChange={(e) => setRepsTimeSec(clamp(parseInt(e.target.value || '0', 10), 5, 3600))} min={5} max={3600} />
+                  </label>
+                )}
+
+                <label>
+                  Récupération (sec)
+                  <input type="number" value={restSec} onChange={(e) => setRestSec(clamp(parseInt(e.target.value || '0', 10), 0, 600))} min={0} max={600} />
+                </label>
+
+                <label>
+                  Taille texte (×)
+                  <input type="range" min={0.5} max={2} step={0.05} value={fontScale} onChange={(e) => setFontScale(parseFloat(e.target.value))} />
+                </label>
+
+                <label>
+                  Beep audio
+                  <input type="checkbox" checked={beep} onChange={(e) => setBeep(e.target.checked)} />
+                </label>
+
+                {beep && (
+                  <>
+                    <label>
+                      Fréquence (Hz)
+                      <input type="number" value={beepFreq} onChange={(e) => setBeepFreq(clamp(parseInt(e.target.value || '0', 10), 100, 4000))} min={100} max={4000} step={10} />
+                    </label>
+                    <label>
+                      Durée beep (ms)
+                      <input type="number" value={beepDurMs} onChange={(e) => setBeepDurMs(clamp(parseInt(e.target.value || '0', 10), 20, 500))} min={20} max={500} step={5} />
+                    </label>
+                  </>
+                )}
+
+                <label>
+                  Plein écran à la lecture
+                  <input type="checkbox" checked={wantFullscreen} onChange={(e) => setWantFullscreen(e.target.checked)} />
+                </label>
+              </div>
+            </div>
+
+            {/* Sélecteurs spécifiques */}
+            {mode === 'stroop' && (
+              <ColorPicker title="Couleurs (texte & mots)" selected={stroopColors} setSelected={setStroopColors} />
+            )}
+
+            {mode === 'numbers' && (
+              <>
+                <ColorPicker title="Couleurs du chiffre" selected={digitColors} setSelected={setDigitColors} />
+                <CheckboxList
+                  title="Chiffres"
+                  options={DIGITS.map(String)}
+                  selected={digits.map(String)}
+                  onToggle={(v) => setDigits((cur) => (cur.includes(Number(v)) ? cur.filter((x) => x !== Number(v)) : [...cur, Number(v)]))}
+                />
+              </>
+            )}
+
+            {mode === 'color' && (
+              <ColorPicker title="Couleurs à afficher" selected={onlyColors} setSelected={setOnlyColors} />
+            )}
+
+            {mode === 'directions' && (
+              <CheckboxList
+                title="Directions"
+                options={DIRECTIONS.map((d) => d.char)}
+                selected={dirs}
+                onToggle={(v) => setDirs((cur) => (cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]))}
+                render={(c) => <span style={{ fontSize: 20 }}>{c}</span>}
+              />
+            )}
+
+            {mode === 'numberColor' && (
+              <>
+                <ColorPicker title="Couleurs de fond" selected={bgColors} setSelected={setBgColors} />
+                <ColorPicker title="Couleurs du chiffre" selected={fgColors} setSelected={setFgColors} />
+                <CheckboxList
+                  title="Chiffres"
+                  options={DIGITS.map(String)}
+                  selected={digits.map(String)}
+                  onToggle={(v) => setDigits((cur) => (cur.includes(Number(v)) ? cur.filter((x) => x !== Number(v)) : [...cur, Number(v)]))}
+                />
+              </>
+            )}
+
+            {mode === 'directionColor' && (
+              <>
+                <ColorPicker title="Couleurs de fond" selected={bgColors} setSelected={setBgColors} />
+                <ColorPicker title="Couleurs de la flèche" selected={fgColors} setSelected={setFgColors} />
+                <CheckboxList
+                  title="Directions"
+                  options={DIRECTIONS.map((d) => d.char)}
+                  selected={dirs}
+                  onToggle={(v) => setDirs((cur) => (cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]))}
+                  render={(c) => <span style={{ fontSize: 20 }}>{c}</span>}
+                />
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )
 }
-
