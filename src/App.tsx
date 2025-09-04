@@ -11,7 +11,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 
-type Mode = 'stroop' | 'numbers' | 'color' | 'directions' | 'numberColor' | 'directionColor'
+type Mode = 'stroop' | 'numbers' | 'color' | 'directions' | 'numberColor' | 'directionColor' | 'combined'
 
 type Stimulus = {
   kind: 'text' | 'block'
@@ -81,6 +81,11 @@ export default function App() {
   const [dirs, setDirs] = useState<string[]>(DIRECTIONS.map((d) => d.char))
   const [bgColors, setBgColors] = useState<string[]>(DEFAULT_BG_COLORS)
   const [fgColors, setFgColors] = useState<string[]>(DEFAULT_TEXT_COLORS)
+
+  // Combiné — éléments à inclure
+  const [combinedIncludeColor, setCombinedIncludeColor] = useState(true)
+  const [combinedIncludeNumbers, setCombinedIncludeNumbers] = useState(true)
+  const [combinedIncludeDirections, setCombinedIncludeDirections] = useState(true)
 
   // Runtime
   const [running, setRunning] = useState(false)
@@ -188,6 +193,26 @@ export default function App() {
         const fg = randItem(fgColors.length ? fgColors : DEFAULT_TEXT_COLORS)
         const d = randItem(dirs.length ? dirs : DIRECTIONS.map((x) => x.char))
         return { kind: 'text', content: d, textColor: fg, bgColor: bg }
+      }
+      case 'combined': {
+        const choices: Array<'color' | 'number' | 'direction'> = []
+        if (combinedIncludeColor) choices.push('color')
+        if (combinedIncludeNumbers) choices.push('number')
+        if (combinedIncludeDirections) choices.push('direction')
+        const pick = choices.length ? randItem(choices) : 'color'
+        if (pick === 'color') {
+          const c = randItem(onlyColors.length ? onlyColors : DEFAULT_TEXT_COLORS)
+          return { kind: 'block', bgColor: c }
+        }
+        if (pick === 'number') {
+          const d = randItem(digits.length ? digits : DIGITS)
+          const c = randItem(fgColors.length ? fgColors : DEFAULT_TEXT_COLORS)
+          return { kind: 'text', content: String(d), textColor: c }
+        }
+        // direction
+        const d = randItem(dirs.length ? dirs : DIRECTIONS.map((x) => x.char))
+        const c = randItem(fgColors.length ? fgColors : DEFAULT_TEXT_COLORS)
+        return { kind: 'text', content: d, textColor: c }
       }
       default:
         return { kind: 'text', content: '?', textColor: '#111827' }
@@ -355,26 +380,44 @@ export default function App() {
           </div>
 
           <div className="card" style={{ height: '70vh', position: 'relative', overflow: 'hidden' , background: stimulus?.bgColor || '#f8fafc'}}>
+            {/* Statut RUNNING en haut à droite (gros et lisible) */}
+            {status === 'running' && (
+              <div style={{ position: 'absolute', top: 10, right: 10, background: 'rgba(255,255,255,0.85)', border: '1px solid #e5e7eb', borderRadius: 12, padding: '6px 10px', fontWeight: 800, zIndex: 5, fontSize: 'clamp(14px, 3.5vw, 26px)' }}>
+                Set {currentSet}/{sets} • Rep {repsMode === 'count' ? `${currentRep}/${repsCount}` : currentRep}
+              </div>
+            )}
+
+            {/* Récupération : plein centre et très visible */}
+            {status === 'rest' && (
+              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 6 }}>
+                <div style={{ fontWeight: 900, fontSize: 'clamp(28px, 9vw, 72px)', color: '#111827', textAlign: 'center', textShadow: '0 2px 14px rgba(0,0,0,0.15)' }}>
+                  Récupération : {restCountdown}s
+                </div>
+              </div>
+            )}
+
             <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              {stimulus ? (
-                stimulus.kind === 'block' ? (
-                  <div style={{ width: '100%', height: '100%' }} />
+              {status !== 'rest' ? (
+                stimulus ? (
+                  stimulus.kind === 'block' ? (
+                    <div style={{ width: '100%', height: '100%' }} />
+                  ) : (
+                    <div style={{
+                      fontWeight: 800,
+                      color: stimulus.textColor || '#111827',
+                      fontSize: `${Math.round(fontScale * 12)}vw`,
+                      lineHeight: 1,
+                      textShadow: '0 2px 12px rgba(0,0,0,0.15)',
+                      userSelect: 'none',
+                      textAlign: 'center'
+                    }}>
+                      {stimulus.content}
+                    </div>
+                  )
                 ) : (
-                  <div style={{
-                    fontWeight: 800,
-                    color: stimulus.textColor || '#111827',
-                    fontSize: `${Math.round(fontScale * 12)}vw`,
-                    lineHeight: 1,
-                    textShadow: '0 2px 12px rgba(0,0,0,0.15)',
-                    userSelect: 'none',
-                    textAlign: 'center'
-                  }}>
-                    {stimulus.content}
-                  </div>
+                  <div style={{ color: '#6b7280' }}>En attente…</div>
                 )
-              ) : (
-                <div style={{ color: '#6b7280' }}>En attente…</div>
-              )}
+              ) : null}
             </div>
           </div>
 
@@ -414,6 +457,7 @@ export default function App() {
                     <option value="directions">Directions</option>
                     <option value="numberColor">Chiffre + Couleur</option>
                     <option value="directionColor">Direction + Couleur</option>
+                  <option value="combined">Combiné</option>
                   </select>
                 </label>
 
@@ -538,6 +582,54 @@ export default function App() {
                 <CheckboxList
                   title="Directions"
                   options={DIRECTIONS.map((d) => d.char)}
+                  selected={dirs}
+                  onToggle={(v) => setDirs((cur) => (cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]))}
+                  render={(c) => <span style={{ fontSize: 20 }}>{c}</span>}
+                />
+              </>
+            )}
+
+            {mode === 'combined' && (
+              <>
+                <div className="card">
+                  <h3 style={{ marginTop: 0 }}>Combiné — éléments à inclure</h3>
+                  <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                    <label><input type="checkbox" checked={combinedIncludeColor} onChange={(e) => setCombinedIncludeColor(e.target.checked)} /> Couleurs</label>
+                    <label><input type="checkbox" checked={combinedIncludeNumbers} onChange={(e) => setCombinedIncludeNumbers(e.target.checked)} /> Chiffres</label>
+                    <label><input type="checkbox" checked={combinedIncludeDirections} onChange={(e) => setCombinedIncludeDirections(e.target.checked)} /> Directions</label>
+                  </div>
+                </div>
+
+                {combinedIncludeColor && (
+                  <ColorPicker title="Couleurs (blocs)" selected={onlyColors} setSelected={setOnlyColors} />
+                )}
+
+                {combinedIncludeNumbers && (
+                  <>
+                    <ColorPicker title="Couleurs du chiffre (texte)" selected={fgColors} setSelected={setFgColors} />
+                    <CheckboxList
+                      title="Chiffres"
+                      options={DIGITS.map(String)}
+                      selected={digits.map(String)}
+                      onToggle={(v) => setDigits((cur) => (cur.includes(Number(v)) ? cur.filter((x) => x !== Number(v)) : [...cur, Number(v)]))}
+                    />
+                  </>
+                )}
+
+                {combinedIncludeDirections && (
+                  <>
+                    <ColorPicker title="Couleurs de la flèche (texte)" selected={fgColors} setSelected={setFgColors} />
+                    <CheckboxList
+                      title="Directions"
+                      options={DIRECTIONS.map((d) => d.char)}
+                      selected={dirs}
+                      onToggle={(v) => setDirs((cur) => (cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]))}
+                      render={(c) => <span style={{ fontSize: 20 }}>{c}</span>}
+                    />
+                  </>
+                )}
+              </>
+            )}
                   selected={dirs}
                   onToggle={(v) => setDirs((cur) => (cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]))}
                   render={(c) => <span style={{ fontSize: 20 }}>{c}</span>}
